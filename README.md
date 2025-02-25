@@ -1,4 +1,4 @@
-# Halin
+# Halin (ဟန်လင်း)
 
 A lightweight, fast, and flexible web framework for Bun, inspired by Express and Hono. Halin provides a simple yet powerful API for building web applications with TypeScript.
 
