@@ -1,0 +1,62 @@
+{
+  "name": "halin",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/halin.ts",
+  "module": "src/halin.ts",
+  "types": "src/halin.ts",
+  "exports": {
+    ".": {
+      "import": "./src/halin.ts",
+      "require": "./src/halin.ts",
+      "types": "./src/halin.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "test:unit": "bun test test/unit/**/*.test.ts",
+    "test:integration": "bun test test/integration/**/*.test.ts",
+    "test:watch": "bun test --watch",
+    "dev": "bun run --watch example/example.ts"
+  },
+  "dependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "bun": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "bun",
+    "web",
+    "framework",
+    "http",
+    "server",
+    "typescript",
+    "router",
+    "middleware",
+    "api",
+    "rest"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "description": "A lightweight, fast, and flexible web framework for Bun",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/halin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/halin/issues"
+  },
+  "homepage": "https://github.com/yourusername/halin#readme"
+}
