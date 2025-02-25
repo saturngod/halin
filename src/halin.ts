@@ -242,6 +242,7 @@ export class Halin {
         const url = new URL(request.url);
         const path = url.pathname;
         const method = request.method;  // Remove 'as HTTPMethod' since we accept any string
+        let currentResponse: Response | SSEWriter | null = null;  // Add this line
         
         try {
           // Find matching route
