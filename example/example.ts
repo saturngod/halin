@@ -596,6 +596,145 @@ app.group('/chat')
     });
   });
 
+// Example of custom status code responses
+app.post('/api/validate', 
+  validateBody({ email: 'string', password: 'string' }),
+  (req, res) => {
+    const { email, password } = req.body;
+    
+    // Validation example
+    if (!email.includes('@')) {
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: {
+          email: 'Invalid email format'
+        }
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: {
+          password: 'Password must be at least 8 characters'
+        }
+      });
+    }
+
+    res.status(200).json({ message: 'Validation passed' });
+  }
+);
+
+// Example with multiple validation checks
+app.post('/api/users', 
+  validateBody({ username: 'string', age: 'number', email: 'string' }),
+  (req, res) => {
+    const { username, age, email } = req.body;
+    const errors = {};
+
+    if (username.length < 3) {
+      errors['username'] = 'Username must be at least 3 characters';
+    }
+
+    if (age < 18) {
+      errors['age'] = 'Must be 18 or older';
+    }
+
+    if (!email.includes('@')) {
+      errors['email'] = 'Invalid email format';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: errors
+      });
+    }
+
+    res.status(201).json({ 
+      message: 'User created successfully',
+      user: { username, age, email }
+    });
+  }
+);
+
+// Example with business logic validation
+app.post('/api/orders',
+  auth,
+  validateBody({ items: 'array', shippingAddress: 'string' }),
+  async (req, res) => {
+    const { items, shippingAddress } = req.body;
+
+    // Check if items are in stock
+    const outOfStockItems = items.filter(item => !isInStock(item.id));
+    if (outOfStockItems.length > 0) {
+      return res.status(422).json({
+        error: 'Order validation failed',
+        details: {
+          items: `Items not in stock: ${outOfStockItems.map(i => i.id).join(', ')}`
+        }
+      });
+    }
+
+    // Validate shipping address
+    if (!isValidShippingAddress(shippingAddress)) {
+      return res.status(422).json({
+        error: 'Order validation failed',
+        details: {
+          shippingAddress: 'Invalid shipping address'
+        }
+      });
+    }
+
+    // Process valid order
+    const order = await createOrder(items, shippingAddress);
+    res.status(201).json({ 
+      message: 'Order created successfully',
+      orderId: order.id
+    });
+  }
+);
+
+// Example with file upload validation
+app.post('/api/files/upload',
+  auth,
+  async (req, res) => {
+    const file = req.body;
+    const maxSize = 5 * 1024 * 1024; // 5MB
+
+    if (!file) {
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: {
+          file: 'No file provided'
+        }
+      });
+    }
+
+    if (file.size > maxSize) {
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: {
+          file: 'File size exceeds 5MB limit'
+        }
+      });
+    }
+
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: {
+          file: 'Only JPEG and PNG files are allowed'
+        }
+      });
+    }
+
+    // Process valid file
+    await saveFile(file);
+    res.status(201).json({ message: 'File uploaded successfully' });
+  }
+);
+
 // Start the server
 app.listen(3000, () => {
   console.log('Server is running on http://localhost:3000');

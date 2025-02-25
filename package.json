@@ -1,6 +1,6 @@
 {
   "name": "halin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "src/halin.ts",
   "module": "src/halin.ts",
@@ -48,15 +48,15 @@
     "api",
     "rest"
   ],
-  "author": "Your Name",
+  "author": "Saturngod",
   "license": "MIT",
   "description": "A lightweight, fast, and flexible web framework for Bun",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/halin.git"
+    "url": "git@github.com:saturngod/halin.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/halin/issues"
+    "url": "https://github.com/saturngod/halin/issues"
   },
-  "homepage": "https://github.com/yourusername/halin#readme"
+  "homepage": "https://github.com/saturngod/halin#readme"
 }

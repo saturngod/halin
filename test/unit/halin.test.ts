@@ -252,4 +252,86 @@ describe("Halin Framework", () => {
       expect(text).toBe("test");
     });
   });
+
+  describe("Response Status Codes", () => {
+    test("should default to status 200 for res.json", async () => {
+      app.get("/default-status", (req, res) => {
+        res.json({ message: "ok" });
+      });
+
+      const response = await app.handle(
+        new Request("http://localhost/default-status")
+      );
+
+      expect(response.status).toBe(200);
+    });
+
+    test("should use custom status code with res.status().json", async () => {
+      app.post("/created", (req, res) => {
+        res.status(201).json({ message: "resource created" });
+      });
+
+      const response = await app.handle(
+        new Request("http://localhost/created", { method: "POST" })
+      );
+
+      expect(response.status).toBe(201);
+    });
+
+    test("should handle 422 validation errors", async () => {
+      app.post("/validate", (req, res) => {
+        return res.status(422).json({
+          error: "Validation failed",
+          details: { field: "invalid" }
+        });
+      });
+
+      const response = await app.handle(
+        new Request("http://localhost/validate", { method: "POST" })
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(422);
+      expect(data).toEqual({
+        error: "Validation failed",
+        details: { field: "invalid" }
+      });
+    });
+
+    test("should maintain status code through middleware chain", async () => {
+      app.post("/chain",
+        async (req, res, next) => {
+          res.status(201);
+          await next();
+        },
+        (req, res) => {
+          res.json({ message: "created" }); // Should maintain 201
+        }
+      );
+
+      const response = await app.handle(
+        new Request("http://localhost/chain", { method: "POST" })
+      );
+
+      expect(response.status).toBe(201);
+    });
+
+    test("should handle multiple status code changes", async () => {
+      app.post("/status-change",
+        async (req, res, next) => {
+          res.status(201);
+          await next();
+        },
+        (req, res) => {
+          res.status(202).json({ message: "accepted" }); // Should override to 202
+        }
+      );
+
+      const response = await app.handle(
+        new Request("http://localhost/status-change", { method: "POST" })
+      );
+
+      expect(response.status).toBe(202);
+    });
+  });
 });

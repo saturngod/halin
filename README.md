@@ -234,6 +234,46 @@ app.on('PROCESS', '/tasks/batch',
 );
 ```
 
+### Response Status Codes
+
+You can set custom status codes with response methods chaining:
+
+```typescript
+// Return 422 Unprocessable Entity with validation errors
+app.post('/api/validate', (req, res) => {
+  const { email } = req.body;
+  
+  if (!email.includes('@')) {
+    return res.status(422).json({
+      error: 'Validation failed',
+      details: { email: 'Invalid email format' }
+    });
+  }
+
+  res.status(200).json({ message: 'Validation passed' });
+});
+
+// Return 201 Created for successful resource creation
+app.post('/api/users', (req, res) => {
+  // ... create user logic ...
+  res.status(201).json({ 
+    message: 'User created',
+    userId: 'new-user-id'
+  });
+});
+
+// Return 403 Forbidden for permission issues
+app.get('/api/admin', (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      error: 'Access denied',
+      message: 'Requires admin privileges'
+    });
+  }
+  res.json({ data: 'admin data' });
+});
+```
+
 ## API Reference
 
 ### Application
