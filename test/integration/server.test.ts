@@ -42,6 +42,20 @@ describe("Halin Server Integration", () => {
           });
         }
 
+        if (url.pathname === "/test-error") {
+          try {
+            const body = await req.json();
+            // This will throw an error when trying to access undefined property
+            const value = body.nonexistentProperty.someValue;
+            return Response.json({ value });
+          } catch (error) {
+            return Response.json(
+              { error: 'Internal Server Error' },
+              { status: 500 }
+            );
+          }
+        }
+
         return new Response("Not Found", { status: 404 });
       }
     });
@@ -80,5 +94,20 @@ describe("Halin Server Integration", () => {
       const text = decoder.decode(value);
       expect(text).toBe('data: {"message":"test"}\n\n');
     }
+  });
+
+  test("should handle 500 error when accessing undefined body property", async () => {
+    const response = await fetch(`${baseUrl}/test-error`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+    
+    expect(response.status).toBe(500);
+    const data = await response.json();
+    expect(data).toHaveProperty('error');
+    expect(data.error).toBe('Internal Server Error');
   });
 });

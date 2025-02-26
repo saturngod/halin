@@ -7,6 +7,14 @@ type Handler = (req: Request, res: Response, next?: NextFunction) => Promise<voi
 type NextFunction = () => Promise<void>;
 type ErrorHandler = (error: Error, req: Request, res: Response, next: NextFunction) => Promise<void> | void;
 
+// Update type safety for request handler
+type ResponseType = Response | SSEWriter;
+
+// Export type definitions
+export type Handler = (req: Request, res: Response, next?: NextFunction) => Promise<void> | void;
+export type NextFunction = () => Promise<void>;
+export type ErrorHandler = (error: Error, req: Request, res: Response, next: NextFunction) => Promise<void> | void;
+
 // Interfaces
 interface RouteDefinition {
   method: HTTPMethod;
@@ -20,6 +28,13 @@ interface RouteMatch {
   params: Record<string, string>;
 }
 
+interface BunRequest extends globalThis.Request {
+  json(): Promise<any>;
+  formData(): Promise<FormData>;
+  text(): Promise<string>;
+}
+
+// Update the Request interface
 interface Request {
   method: string;
   url: string;
@@ -28,7 +43,8 @@ interface Request {
   query: Record<string, string>;
   headers: Headers;
   body: any;
-  raw: globalThis.Request;
+  raw: BunRequest;
+  json(): Promise<any>;
 }
 
 interface Response {
@@ -45,16 +61,27 @@ interface Response {
 }
 
 // Add SSE (Server-Sent Events) interface
-interface SSEResponse extends Response {
-  send: (data: any) => boolean;
+interface SSEResponse {
+  statusCode: number;
+  headers: Headers;
+  body: ReadableStream;
+  send: (data: any) => void;
   close: () => void;
+}
+
+interface CustomResponse extends Response {
+  statusCode: number;
+  header: (name: string, value: string) => CustomResponse;
+  send: (data: any) => CustomResponse;
+  stream: (stream: ReadableStream) => CustomResponse;
+  sse: () => SSEResponse;
 }
 
 class SSEWriter implements SSEResponse {
   statusCode: number = 200;
   headers: Headers;
   body: ReadableStream;
-  private controller: ReadableStreamDefaultController;
+  private controller!: ReadableStreamDefaultController;
   private encoder: TextEncoder;
   private closed: boolean = false;
 
@@ -70,8 +97,6 @@ class SSEWriter implements SSEResponse {
     this.body = new ReadableStream({
       start(controller) {
         self.controller = controller;
-        // Ensure initial headers are set
-        self.header('Content-Type', 'text/event-stream');
       },
       cancel() {
         self.closed = true;
@@ -79,42 +104,12 @@ class SSEWriter implements SSEResponse {
     });
   }
 
-  status(code: number): Response {
-    this.statusCode = code;
-    return this;
-  }
-
-  header(name: string, value: string): Response {
-    this.headers.set(name, value);
-    return this;
-  }
-
-  json(data: any): Response {
-    this.send(data);
-    return this;
-  }
-
-  text(data: string): Response {
-    this.send(data);
-    return this;
-  }
-
-  stream(stream: ReadableStream): Response {
-    this.body = stream;
-    return this;
-  }
-
-  sse(): SSEResponse {
-    return this;
-  }
-
-  send(data: any): boolean {
-    if (this.closed) return false;
+  send(data: any): void {
+    if (this.closed) return;
     
     const message = typeof data === 'string' ? data : JSON.stringify(data);
     const encoded = this.encoder.encode(`data: ${message}\n\n`);
     this.controller.enqueue(encoded);
-    return true;
   }
 
   close(): void {
@@ -125,7 +120,7 @@ class SSEWriter implements SSEResponse {
   }
 }
 
-class HalinError extends Error {
+export class HalinError extends Error {
   constructor(public statusCode: number, message: string) {
     super(message);
     this.name = 'HalinError';
@@ -236,165 +231,200 @@ export class Halin {
 
   // Server start
   listen(port: number, callback?: (server: any) => void): any {
-    const server = Bun.serve({
-      port,
-      fetch: async (request: globalThis.Request) => {
-        const url = new URL(request.url);
-        const path = url.pathname;
-        const method = request.method;  // Remove 'as HTTPMethod' since we accept any string
-        let currentResponse: Response | SSEWriter | null = null;  // Add this line
-        
-        try {
-          // Find matching route
-          const match = this.findRoute(method, path);
-          
-          if (!match) {
-            throw new HalinError(404, 'Not Found');
-          }
-          
-          // Parse request body based on Content-Type
-          const contentType = request.headers.get('Content-Type');
-          let body: any = null;
-          
-          if (request.body) {
-            if (contentType?.includes('application/json')) {
-              try {
-                body = await request.json();
-              } catch (error) {
-                throw new HalinError(400, 'Invalid JSON body');
-              }
-            } else if (contentType?.includes('application/x-www-form-urlencoded')) {
-              try {
-                const formData = await request.formData();
-                body = Object.fromEntries(formData);
-              } catch (error) {
-                throw new HalinError(400, 'Invalid form data');
-              }
-            } else {
-              body = await request.text();
-            }
-          }
-          
-          // Create request and response objects
-          const req: Request = {
-            method,
-            url: request.url,
-            path,
-            params: match.params,
-            query: Object.fromEntries(url.searchParams),
-            headers: request.headers,
-            body,
-            raw: request
-          };
-          
-          const res: Response = {
-            statusCode: 200,
-            headers: new Headers(),
-            body: null,
-            status(code: number) {
-              this.statusCode = code;
-              return this;
-            },
-            header(name: string, value: string) {
-              this.headers.set(name, value);
-              return this;
-            },
-            json(data: any) {
-              this.header('Content-Type', 'application/json');
-              this.body = JSON.stringify(data);
-              return this;
-            },
-            text(data: string) {
-              this.header('Content-Type', 'text/plain');
-              this.body = data;
-              return this;
-            },
-            send(data: any) {
-              if (typeof data === 'object') {
-                return this.json(data);
-              }
-              return this.text(String(data));
-            },
-            stream(stream: ReadableStream) {
-              this.body = stream;
-              return this;
-            },
-            sse() {
-              const sseWriter = new SSEWriter();
-              currentResponse = sseWriter;
-              return sseWriter;
-            }
-          };
-          
-          // Execute middleware stack
-          let index = 0;
-          const middlewares = [...this.middlewares, ...match.route.handlers];
-          
-          const next: NextFunction = async () => {
-            if (index < middlewares.length) {
-              const middleware = middlewares[index++];
-              await middleware(req, res, next);
-            }
-          };
+    let server: any;
+    try {
+      server = Bun.serve({
+        port,
+        fetch: async (request: BunRequest) => {
+          const url = new URL(request.url);
+          const path = url.pathname;
+          const method = request.method;
+          let currentResponse: ResponseType | null = null;
 
           try {
-            await next();
-          } catch (error) {
-            // Handle errors through error middleware chain
-            if (this.errorHandlers.length > 0) {
-              let errorIndex = 0;
-              const errorNext = async () => {
-                if (errorIndex < this.errorHandlers.length) {
-                  const errorHandler = this.errorHandlers[errorIndex++];
-                  await errorHandler(error as Error, req, res, errorNext);
+            // Find matching route
+            const match = this.findRoute(method, path);
+            
+            if (!match) {
+              throw new HalinError(404, 'Not Found');
+            }
+            
+            // Parse request body based on Content-Type
+            const contentType = request.headers.get('Content-Type');
+            let body: any = null;
+            
+            if (request.body) {
+              try {
+                if (contentType?.includes('application/json')) {
+                  body = await request.json();
+                } else if (contentType?.includes('application/x-www-form-urlencoded')) {
+                  const formData = await request.formData();
+                  // Convert FormData to object manually
+                  const formDataObj: Record<string, string> = {};
+                  formData.forEach((value, key) => {
+                    formDataObj[key] = value.toString();
+                  });
+                  body = formDataObj;
                 } else {
-                  throw error;
+                  body = await request.text();
                 }
-              };
-              await errorNext();
+              } catch (err) {
+                const error = err as Error;
+                throw new HalinError(400, `Invalid request body: ${error.message}`);
+              }
+            }
+
+            // Create request object
+            const req = {
+              method,
+              url: request.url,
+              path,
+              params: match.params,
+              query: Object.fromEntries(url.searchParams),
+              headers: request.headers,
+              body,
+              raw: request as BunRequest,
+              json: () => Promise.resolve(body)
+            } as Request;
+
+            // Create response object
+            const res = {
+              statusCode: 200,
+              headers: new Headers(),
+              body: null,
+              status(code: number) {
+                this.statusCode = code;
+                return this;
+              },
+              header(name: string, value: string) {
+                this.headers.set(name, value);
+                return this;
+              },
+              json(data: any) {
+                this.header('Content-Type', 'application/json');
+                this.body = JSON.stringify(data);
+                return this;
+              },
+              text(data: string) {
+                this.header('Content-Type', 'text/plain');
+                this.body = data;
+                return this;
+              },
+              send(data: any) {
+                if (typeof data === 'object') {
+                  return this.json(data);
+                }
+                return this.text(String(data));
+              },
+              stream(stream: ReadableStream) {
+                this.body = stream;
+                return this;
+              },
+              sse() {
+                const writer = new SSEWriter();
+                currentResponse = writer;
+                return writer;
+              }
+            } as Response;
+
+            // Execute middleware stack
+            let index = 0;
+            const middlewares = [...this.middlewares, ...match.route.handlers];
+            
+            const next: NextFunction = async () => {
+              try {
+                if (index < middlewares.length) {
+                  const middleware = middlewares[index++];
+                  await middleware(req, res, next);
+                }
+              } catch (err) {
+                const error = err as Error;
+                throw error instanceof HalinError ? error : new HalinError(500, `Middleware error: ${error.message}`);
+              }
+            };
+
+            try {
+              await next();
+            } catch (err) {
+              const error = err as Error;
+              if (this.errorHandlers.length > 0) {
+                let errorIndex = 0;
+                const errorNext = async () => {
+                  try {
+                    if (errorIndex < this.errorHandlers.length) {
+                      const errorHandler = this.errorHandlers[errorIndex++];
+                      await errorHandler(error, req, res, errorNext);
+                    } else {
+                      throw error;
+                    }
+                  } catch (e) {
+                    const innerError = e as Error;
+                    throw innerError instanceof HalinError ? innerError : new HalinError(500, `Error handler failed: ${innerError.message}`);
+                  }
+                };
+                await errorNext();
+              } else {
+                throw error;
+              }
+            }
+
+            // Handle SSE responses
+            if (currentResponse && 'send' in currentResponse && 'close' in currentResponse) {
+              const sseResponse = currentResponse as SSEWriter;
+              return new globalThis.Response(sseResponse.body, {
+                status: sseResponse.statusCode,
+                headers: sseResponse.headers
+              });
+            }
+
+            // Handle regular responses
+            return new globalThis.Response(res.body, {
+              status: res.statusCode,
+              headers: res.headers
+            });
+
+          } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Request Error:', error);
+            
+            if (error instanceof HalinError) {
+              return new globalThis.Response(
+                JSON.stringify({ error: error.message }), 
+                { 
+                  status: error.statusCode,
+                  headers: { 'Content-Type': 'application/json' }
+                }
+              );
             } else {
-              throw error;
+              const errorMessage = error?.message || 'Internal Server Error';
+              return new globalThis.Response(
+                JSON.stringify({ 
+                  error: 'Internal Server Error',
+                  message: process.env.NODE_ENV === 'development' ? errorMessage : undefined 
+                }), 
+                { 
+                  status: 500,
+                  headers: { 'Content-Type': 'application/json' }
+                }
+              );
             }
           }
-
-          // Return final response
-          if (currentResponse instanceof SSEWriter) {
-            return new Response(currentResponse.body, {
-              status: currentResponse.statusCode,
-              headers: currentResponse.headers
-            });
-          }
-
-          return new Response(res.body, {
-            status: res.statusCode,
-            headers: res.headers
-          });
-        } catch (error) {
-          // Final error handling
-          if (error instanceof HalinError) {
-            return new Response(JSON.stringify({ error: error.message }), { 
-              status: error.statusCode,
-              headers: { 'Content-Type': 'application/json' }
-            });
-          } else {
-            console.error('Internal Server Error:', error);
-            return new Response(JSON.stringify({ error: 'Internal Server Error' }), { 
-              status: 500,
-              headers: { 'Content-Type': 'application/json' }
-            });
-          }
         }
-      }
-    });
-    
-    if (callback) callback(server);
-    
-    console.log(`Server running at http://localhost:${port}`);
-    return server;
+      });
+      
+      if (callback) callback(server);
+      
+      return server;
+
+    } catch (err) {
+      const error = err as Error;
+      console.error('Server Initialization Error:', error);
+      throw new Error(`Failed to start server: ${error.message}`);
+    }
   }
 
   // Handle method for testing
-  async handle(request: Request): Promise<Response> {
+  async handle(request: Request): Promise<globalThis.Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
@@ -409,10 +439,11 @@ export class Halin {
         query: Object.fromEntries(url.searchParams),
         headers: request.headers,
         body: null,
-        raw: request
+        raw: request.raw || {} as BunRequest,
+        json: () => Promise.resolve(request.body)
       };
 
-      let currentResponse: Response | SSEWriter | null = null;
+      let currentResponse: ResponseType | null = null;
 
       const res: Response = {
         statusCode: 200,
@@ -457,9 +488,11 @@ export class Halin {
         // Find matching route after creating req/res objects
         const match = this.findRoute(method, path);
         
-        if (match) {
-          req.params = match.params;
+        if (!match) {
+          throw new HalinError(404, 'Not Found');
         }
+
+        req.params = match.params;
 
         // Parse body if present
         if (request.body) {
@@ -475,10 +508,7 @@ export class Halin {
 
         // Combine all handlers including middleware and route handlers
         const handlers = [...this.middlewares];
-        
-        if (match) {
-          handlers.push(...match.route.handlers);
-        }
+        handlers.push(...match.route.handlers);
 
         // Execute handler chain
         let index = 0;
@@ -487,8 +517,6 @@ export class Halin {
             if (index < handlers.length) {
               const handler = handlers[index++];
               await handler(req, res, next);
-            } else if (!match) {
-              throw new HalinError(404, 'Not Found');
             }
           } catch (e) {
             throw e;
@@ -497,50 +525,60 @@ export class Halin {
 
         await next();
 
-        if (currentResponse instanceof SSEWriter) {
-          return new Response(currentResponse.body, {
-            status: currentResponse.statusCode,
-            headers: currentResponse.headers
+        if (currentResponse && 'send' in currentResponse && 'close' in currentResponse) {
+          const sseResponse = currentResponse as SSEWriter;
+          return new globalThis.Response(sseResponse.body, {
+            status: sseResponse.statusCode,
+            headers: sseResponse.headers
           });
         }
 
-        return new Response(res.body, {
+        return new globalThis.Response(res.body, {
           status: res.statusCode,
           headers: res.headers
         });
-      } catch (error) {
+
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
         // Handle errors through error middleware chain
         if (this.errorHandlers.length > 0) {
           let errorIndex = 0;
           const errorNext = async () => {
             if (errorIndex < this.errorHandlers.length) {
               const handler = this.errorHandlers[errorIndex++];
-              await handler(error as Error, req, res, errorNext);
+              await handler(error, req, res, errorNext);
             } else {
               throw error;
             }
           };
           await errorNext();
 
-          return new Response(res.body, {
+          return new globalThis.Response(res.body, {
             status: res.statusCode,
             headers: res.headers
           });
         }
         throw error;
       }
-    } catch (error) {
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
       // Final error handling
       if (error instanceof HalinError) {
-        return new Response(JSON.stringify({ error: error.message }), { 
-          status: error.statusCode,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new globalThis.Response(
+          JSON.stringify({ error: error.message }), 
+          { 
+            status: error.statusCode,
+            headers: new Headers({ 'Content-Type': 'application/json' })
+          }
+        );
       } else {
-        return new Response(JSON.stringify({ error: error.message || 'Internal Server Error' }), { 
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new globalThis.Response(
+          JSON.stringify({ error: error.message || 'Internal Server Error' }), 
+          { 
+            status: 500,
+            headers: new Headers({ 'Content-Type': 'application/json' })
+          }
+        );
       }
     }
   }
